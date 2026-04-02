@@ -36,7 +36,7 @@ interface FinancialSummaryTabProps {
   hospitalBillBreakdown?: HospitalBillBreakdownItem[] | null;
   hospitalBillPageNumber?: number | null;
   onHospitalAmountClick?: (pageNumber?: number | null) => void;
-  onTariffAmountClick?: (pageNumber?: number | null) => void;
+  onTariffAmountClick?: (pageNumber?: number | null, highlightText?: string) => void;
   /** Passed from result-view — same claimId used by benefit-plan and patient-info tabs */
   claimId?: string;
 }
@@ -264,12 +264,30 @@ export function FinancialSummaryTab({
               </div>
               <div className="space-y-1 border-t border-green-200 pt-2">
                 {tariffItems.length > 0 ? (
-                  tariffItems.map((item, idx) => (
-                    <div key={`tariff-breakdown-${idx}`} className="flex items-center justify-between text-sm">
-                      <span className="text-green-700">{item.name}</span>
-                      <span className="font-medium text-green-900">{formatAmountValue(item.amount)}</span>
-                    </div>
-                  ))
+                  tariffItems.map((item, idx) => {
+                    const amountStr = formatAmountValue(item.amount);
+                    const clickable = tariffLinkable && item.amount != null;
+                    return (
+                      <div
+                        key={`tariff-breakdown-${idx}`}
+                        className={`flex items-center justify-between text-sm rounded px-1 py-0.5 ${
+                          clickable
+                            ? "cursor-pointer hover:bg-green-100 transition-colors"
+                            : ""
+                        }`}
+                        onClick={() => {
+                          if (clickable && onTariffAmountClick) {
+                            onTariffAmountClick(tariffPageNumber, amountStr);
+                          }
+                        }}
+                      >
+                        <span className="text-green-700">{item.name}</span>
+                        <span className={`font-medium text-green-900 ${clickable ? "underline decoration-dotted" : ""}`}>
+                          {amountStr}
+                        </span>
+                      </div>
+                    );
+                  })
                 ) : (
                   <div className="text-sm text-green-700">—</div>
                 )}
