@@ -88,14 +88,7 @@ type DbGroupId =
   | "other";
 
 const DB_GROUP_ORDER: Array<{ id: DbGroupId; title: string }> = [
-  { id: "policy", title: "Policy Details" },
-  {
-    id: "patientEnrolled",
-    title: "Patient Enrolled Details",
-  },
-  { id: "balanceSumInsured", title: "Balance Sum Insured" },
   { id: "insurerBenefits", title: "InsurerBenefits" },
-  { id: "provider", title: "Provider Details" },
   {
     id: "ucrPastHistory",
     title: "Usual, Customary and Reasonable Charges Report [UCR] & Hospital Past History",
@@ -104,11 +97,7 @@ const DB_GROUP_ORDER: Array<{ id: DbGroupId; title: string }> = [
 ];
 
 const ACCORDION_GROUP_IDS = new Set<DbGroupId>([
-  "policy",
-  "patientEnrolled",
-  "balanceSumInsured",
   "ucrPastHistory",
-  "provider",
   "other",
 ]);
 
@@ -1687,14 +1676,6 @@ export function PatientInfoTab({
         validationField: "policyNumber",
       },
       {
-        key: "invoiceNumber",
-        label: "Invoice Number",
-        changeLabel: "INVOICE NUMBER",
-        placeholder: "Invoice number",
-        dbEntries: allDbEntries,
-        dbAliases: ["claimnumber", "invoicenumber", "invoice"],
-      },
-      {
         key: "date",
         label: "Document Date",
         changeLabel: "DOCUMENT DATE",
@@ -1717,15 +1698,6 @@ export function PatientInfoTab({
         placeholder: "Discharge date",
         dbEntries: allDbEntries,
         dbAliases: ["dateofdischarge", "dod", "dischargedate"],
-      },
-      {
-        key: "totalAmount",
-        label: "Bill Amount",
-        changeLabel: "TOTAL AMOUNT",
-        placeholder: "0.00",
-        type: "number",
-        dbEntries: allDbEntries,
-        dbAliases: ["claimedamount", "billamount", "grossamount", "totalamount"],
       },
       {
         key: "discount",
@@ -1769,28 +1741,6 @@ export function PatientInfoTab({
               readOnly
             />
           </div>
-          <EditableInfoField
-            label="CGST"
-            value={displayAnalysis?.gst?.value?.cgstAmount}
-            onChange={(value) =>
-              updateGstField("cgstAmount", value ? parseFloat(value) : undefined)
-            }
-            type="number"
-            placeholder="0.00"
-            pageNumber={displayAnalysis?.gst?.pageNumber}
-            onNavigateToPage={onScrollToPage}
-          />
-          <EditableInfoField
-            label="SGST"
-            value={displayAnalysis?.gst?.value?.sgstAmount}
-            onChange={(value) =>
-              updateGstField("sgstAmount", value ? parseFloat(value) : undefined)
-            }
-            type="number"
-            placeholder="0.00"
-            pageNumber={displayAnalysis?.gst?.pageNumber}
-            onNavigateToPage={onScrollToPage}
-          />
         </div>
       </div>
     );
