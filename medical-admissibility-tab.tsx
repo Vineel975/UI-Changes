@@ -32,20 +32,27 @@ type ConditionRow = {
   test: string;
   reported: "Yes" | "No";
   icdCode?: string;
+  icdDescription?: string;
   pageNumber?: number;
   conditionKey: string;
 };
 
-/** Fetches the best-matching ICD-10-CM code for any condition via NLM API. */
-async function fetchICDCode(condition: string): Promise<string | undefined> {
+/** Fetches the best-matching ICD-10-CM code and description for any condition via NLM API. */
+async function fetchICDCode(
+  condition: string,
+): Promise<{ code: string; description: string } | undefined> {
   try {
     const searchTerm = condition.split("(")[0].trim().toLowerCase();
+    // API returns [numFound, [codes], extra, [[code, description], ...]]
     const response = await fetch(
       `https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?sf=code,name&terms=${encodeURIComponent(searchTerm)}&maxList=10`,
     );
-    const result = await response.json() as [number, string[]];
+    const result = await response.json() as [number, string[], unknown, string[][]];
     if (Array.isArray(result) && result[1]?.length > 0) {
-      return result[1][0];
+      const code = result[1][0];
+      const namePair = result[3]?.[0];
+      const description = Array.isArray(namePair) ? (namePair[1] ?? "") : "";
+      return { code, description };
     }
     return undefined;
   } catch {
@@ -55,7 +62,34 @@ async function fetchICDCode(condition: string): Promise<string | undefined> {
 
 function buildConditionRows(
   conditionTests: ConditionTestCheck[],
-  icdCodeMap: Map<string, string>,
+  icdCodeMap: Map<string, { code: string; description: string }>,
+): ConditionRow[] {
+  if (!conditionTests.length) return [];
+
+  return conditionTests.map((ct) => {
+    const conditionKey = (ct.condition || ct.matchedDiagnosis || "")
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+    const icdEntry = icdCodeMap.get(conditionKey);
+
+    const reported: "Yes" | "No" =
+      ct.status === "expected" ||
+      (ct.reportValue || "").toLowerCase() === "yes"
+        ? "Yes"
+        : "No";
+
+    return {
+      condition: ct.condition || ct.matchedDiagnosis || "—",
+      test: ct.testName || "—",
+      reported,
+      icdCode: icdEntry?.code,
+      icdDescription: icdEntry?.description,
+      pageNumber: ct.pageNumber,
+      conditionKey,
+    };
+  });
+}
 ): ConditionRow[] {
   if (!conditionTests.length) return [];
 
@@ -88,9 +122,9 @@ export function MedicalAdmissibilityTab({
   medicalAdmissibility,
   onScrollToPage,
 }: MedicalAdmissibilityTabProps) {
-  const [icdCodeMap, setIcdCodeMap] = useState<Map<string, string>>(new Map());
+  const [icdCodeMap, setIcdCodeMap] = useState<Map<string, { code: string; description: string }>>(new Map());
 
-  // Fetch ICD-10-CM codes for all conditions extracted by AI via NLM API
+  // Fetch ICD-10-CM codes and descriptions for all AI-extracted conditions via NLM API
   useEffect(() => {
     const fetchICDCodes = async () => {
       if (!medicalAdmissibility) return;
@@ -101,7 +135,7 @@ export function MedicalAdmissibilityTab({
 
       if (!conditionTests.length) return;
 
-      const newIcdCodeMap = new Map<string, string>();
+      const newIcdCodeMap = new Map<string, { code: string; description: string }>();
 
       await Promise.all(
         conditionTests.map(async (ct) => {
@@ -111,9 +145,9 @@ export function MedicalAdmissibilityTab({
           if (!conditionKey || newIcdCodeMap.has(conditionKey)) return;
 
           const conditionLabel = ct.condition || ct.matchedDiagnosis || "";
-          const fetchedCode = await fetchICDCode(conditionLabel);
-          if (fetchedCode) {
-            newIcdCodeMap.set(conditionKey, fetchedCode);
+          const fetched = await fetchICDCode(conditionLabel);
+          if (fetched) {
+            newIcdCodeMap.set(conditionKey, fetched);
           }
         }),
       );
@@ -268,8 +302,15 @@ export function MedicalAdmissibilityTab({
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
+                            {/* ICD Description — from NLM API lookup */}
                             <TableCell className="align-top">
-                              <span className="text-xs text-muted-foreground">—</span>
+                              {row.icdDescription ? (
+                                <span className="text-sm text-gray-700">
+                                  {row.icdDescription}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                             <TableCell
                               className="align-top"
