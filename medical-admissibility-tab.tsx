@@ -384,37 +384,6 @@ export function MedicalAdmissibilityTab({
         ) : (
           <div className="space-y-4">
 
-              {/* ICD Codes — three levels side by side */}
-              {(medicalAdmissibility.icdCode1 ||
-                medicalAdmissibility.icdCode2 ||
-                medicalAdmissibility.icdCode3) && (
-                <div className="grid grid-cols-3 gap-3">
-                  {(
-                    [
-                      { label: "ICD Code-1", value: medicalAdmissibility.icdCode1 },
-                      { label: "ICD Code-2", value: medicalAdmissibility.icdCode2 },
-                      { label: "ICD Code-3", value: medicalAdmissibility.icdCode3 },
-                    ] as { label: string; value: string | undefined }[]
-                  ).map(({ label, value }) => (
-                    <div
-                      key={label}
-                      className="rounded-md border bg-blue-50 border-blue-200 p-3 space-y-1"
-                    >
-                      <div className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                        {label}
-                      </div>
-                      <div className="text-sm font-mono font-bold text-blue-800">
-                        {value ?? (
-                          <span className="text-xs font-normal text-muted-foreground font-sans">
-                            —
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {medicalAdmissibility.diagnosis && (
                 <div className="space-y-2">
                   <div className="text-sm font-semibold text-gray-700">
@@ -463,7 +432,9 @@ export function MedicalAdmissibilityTab({
                         <TableRow>
                           <TableHead>Condition</TableHead>
                           <TableHead>Test</TableHead>
-                          <TableHead>ICD Code</TableHead>
+                          <TableHead>ICD Code-1</TableHead>
+                          <TableHead>ICD Code-2</TableHead>
+                          <TableHead>ICD Code-3</TableHead>
                           <TableHead>ICD Description</TableHead>
                           <TableHead>Reported</TableHead>
                         </TableRow>
@@ -498,6 +469,7 @@ export function MedicalAdmissibilityTab({
                             >
                               {row.test}
                             </TableCell>
+                            {/* ICD Code-1 */}
                             <TableCell className="align-top">
                               {row.conditionKey === "cataract" ? (
                                 <Select
@@ -521,10 +493,32 @@ export function MedicalAdmissibilityTab({
                                 <span className="text-sm font-mono text-blue-700">
                                   {row.icdCode}
                                 </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  Loading...
+                              ) : medicalAdmissibility?.icdCode1 ? (
+                                <span className="text-sm font-mono text-blue-700">
+                                  {medicalAdmissibility.icdCode1}
                                 </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            {/* ICD Code-2 */}
+                            <TableCell className="align-top">
+                              {medicalAdmissibility?.icdCode2 ? (
+                                <span className="text-sm font-mono text-blue-700">
+                                  {medicalAdmissibility.icdCode2}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            {/* ICD Code-3 */}
+                            <TableCell className="align-top">
+                              {medicalAdmissibility?.icdCode3 ? (
+                                <span className="text-sm font-mono text-blue-700">
+                                  {medicalAdmissibility.icdCode3}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
                             <TableCell className="align-top">
