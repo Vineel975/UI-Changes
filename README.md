@@ -1,0 +1,2 @@
+Type '{ fileName: string; claimCalculation: ClaimCalculationResult | null; financialSummaryTotals: { hospitalBillAfterDiscount: number; hospitalBillBeforeDiscount: number; ... 7 more ...; cataractSublimit: null; }; ... 18 more ...; bsiData: BSIData | null; }' is not assignable to type 'IntrinsicAttributes & FinancialSummaryTabProps'.
+  Property 'bsiData' does not exist on type 'IntrinsicAttributes & FinancialSummaryTabProps'.ts(2322)
