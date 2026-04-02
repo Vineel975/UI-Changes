@@ -36,7 +36,7 @@ interface FinancialSummaryTabProps {
   hospitalBillBreakdown?: HospitalBillBreakdownItem[] | null;
   hospitalBillPageNumber?: number | null;
   onHospitalAmountClick?: (pageNumber?: number | null) => void;
-  onTariffAmountClick?: (pageNumber?: number | null, highlightText?: string) => void;
+  onTariffAmountClick?: (pageNumber?: number | null, highlightText?: string, highlightName?: string) => void;
   /** Passed from result-view — same claimId used by benefit-plan and patient-info tabs */
   claimId?: string;
 }
@@ -277,7 +277,7 @@ export function FinancialSummaryTab({
                         }`}
                         onClick={() => {
                           if (clickable && onTariffAmountClick) {
-                            onTariffAmountClick(tariffPageNumber, amountStr);
+                            onTariffAmountClick(tariffPageNumber, amountStr, item.name);
                           }
                         }}
                       >
