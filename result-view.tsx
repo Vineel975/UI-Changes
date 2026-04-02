@@ -26,7 +26,6 @@ import { PdfViewerPanel } from "./result-view/pdf-viewer-panel";
 import { PatientInfoTab } from "./result-view/tabs/patient-info-tab";
 import { MedicalAdmissibilityTab } from "./result-view/tabs/medical-admissibility-tab";
 import { FinancialSummaryTab } from "./result-view/tabs/financial-summary-tab";
-import { ChangeLogTab } from "./result-view/tabs/changelog-tab";
 import { useMutation as useConvexMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { CheckCircle2, HelpCircle, XCircle } from "lucide-react";
@@ -77,13 +76,8 @@ export function ResultView({
   const reportSections = useMemo(
     () => [
       { id: "patient", label: "Patient Info" },
-      // { id: "hospitalSummary", label: "Hospital Summary" },
-      // { id: "lines", label: "TPA Lines" },
-      // { id: "policyAudit", label: "Policy Audit" },
       { id: "medicalAdmissibility", label: "Medical Admissibility" },
-      // { id: "summary", label: "TPA Summary" },
       { id: "financialSummary", label: "Summary" },
-      { id: "changelog", label: "Change Log" },
     ],
     [],
   );
@@ -525,17 +519,6 @@ export function ResultView({
 
   return (
     <main className="flex-1 w-full h-full overflow-hidden">
-      {canToggleLogsPanel && (
-        <div className="flex justify-end gap-2 px-4 py-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setIsLogsPanelForced((prev) => !prev)}
-          >
-            {isLogsPanelForced ? "View Analysis" : "View Logs"}
-          </Button>
-        </div>
-      )}
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         {/* Tabs Content - Left Side */}
         <ResizablePanel
@@ -560,7 +543,7 @@ export function ResultView({
                       data-variant="default"
                       className={cn(
                         tabsListVariants({ variant: "default" }),
-                         "grid w-full grid-cols-4",
+                         "grid w-full grid-cols-3",
                       )}
                     >
                       {reportSections.map((section) => (
@@ -643,12 +626,7 @@ export function ResultView({
                       }
                     }}
                     onTariffAmountClick={handleScrollToTariffPage}
-                  />
-                </section>
-                <section id="changelog" className="py-2">
-                  <ChangeLogTab
-                    fileName={fileName}
-                    entries={changeLogEntries}
+                    claimId={state?.claimId}
                   />
                 </section>
                 <div className="mt-6 border-t border-border/80 py-4">
