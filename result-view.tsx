@@ -26,6 +26,7 @@ import { PdfViewerPanel } from "./result-view/pdf-viewer-panel";
 import { PatientInfoTab } from "./result-view/tabs/patient-info-tab";
 import { MedicalAdmissibilityTab } from "./result-view/tabs/medical-admissibility-tab";
 import { FinancialSummaryTab } from "./result-view/tabs/financial-summary-tab";
+import { ChangeLogTab } from "./result-view/tabs/changelog-tab";
 import { useMutation as useConvexMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { CheckCircle2, HelpCircle, XCircle } from "lucide-react";
@@ -76,8 +77,13 @@ export function ResultView({
   const reportSections = useMemo(
     () => [
       { id: "patient", label: "Patient Info" },
+      // { id: "hospitalSummary", label: "Hospital Summary" },
+      // { id: "lines", label: "TPA Lines" },
+      // { id: "policyAudit", label: "Policy Audit" },
       { id: "medicalAdmissibility", label: "Medical Admissibility" },
+      // { id: "summary", label: "TPA Summary" },
       { id: "financialSummary", label: "Summary" },
+      { id: "changelog", label: "Change Log" },
     ],
     [],
   );
@@ -208,14 +214,26 @@ export function ResultView({
     }, 100);
   };
 
-  const handleScrollToTariffPage = (pageNumber?: number | null) => {
+  const handleScrollToTariffPage = (pageNumber?: number | null, highlightText?: string) => {
     if (!pdfContainerRef.current || !pageNumber || pageNumber <= 0) return;
     if (!tariffFile) return;
 
     setActivePdfFile("tariff");
 
+    // Remove any previous highlights
+    const clearHighlights = () => {
+      document.querySelectorAll(".tariff-highlight").forEach((el) => {
+        (el as HTMLElement).classList.remove("tariff-highlight");
+        (el as HTMLElement).style.removeProperty("background");
+        (el as HTMLElement).style.removeProperty("border-radius");
+        (el as HTMLElement).style.removeProperty("padding");
+      });
+    };
+
     setTimeout(() => {
       if (!pdfContainerRef.current) return;
+
+      clearHighlights();
 
       const pageElements =
         pdfContainerRef.current.querySelectorAll("[data-page-number]");
@@ -229,6 +247,31 @@ export function ResultView({
             behavior: "smooth",
             block: "start",
           });
+
+          // Highlight matching text in the text layer after a short delay
+          // to allow the page to fully render
+          if (highlightText) {
+            const normalizedSearch = highlightText.replace(/,/g, "").trim();
+            setTimeout(() => {
+              const textSpans = (el as HTMLElement).querySelectorAll(
+                ".react-pdf__Page__textContent span",
+              );
+              textSpans.forEach((span) => {
+                const text = span.textContent?.replace(/,/g, "").trim() || "";
+                if (
+                  text.includes(normalizedSearch) ||
+                  normalizedSearch.includes(text) &&
+                  text.length > 2
+                ) {
+                  (span as HTMLElement).classList.add("tariff-highlight");
+                  (span as HTMLElement).style.background = "rgba(251, 191, 36, 0.6)";
+                  (span as HTMLElement).style.borderRadius = "2px";
+                  (span as HTMLElement).style.padding = "1px 2px";
+                }
+              });
+            }, 600);
+          }
+
           break;
         }
       }
@@ -482,6 +525,17 @@ export function ResultView({
 
   return (
     <main className="flex-1 w-full h-full overflow-hidden">
+      {canToggleLogsPanel && (
+        <div className="flex justify-end gap-2 px-4 py-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsLogsPanelForced((prev) => !prev)}
+          >
+            {isLogsPanelForced ? "View Analysis" : "View Logs"}
+          </Button>
+        </div>
+      )}
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         {/* Tabs Content - Left Side */}
         <ResizablePanel
@@ -506,7 +560,7 @@ export function ResultView({
                       data-variant="default"
                       className={cn(
                         tabsListVariants({ variant: "default" }),
-                         "grid w-full grid-cols-3",
+                         "grid w-full grid-cols-4",
                       )}
                     >
                       {reportSections.map((section) => (
@@ -589,7 +643,12 @@ export function ResultView({
                       }
                     }}
                     onTariffAmountClick={handleScrollToTariffPage}
-                    claimId={state?.claimId}
+                  />
+                </section>
+                <section id="changelog" className="py-2">
+                  <ChangeLogTab
+                    fileName={fileName}
+                    entries={changeLogEntries}
                   />
                 </section>
                 <div className="mt-6 border-t border-border/80 py-4">
