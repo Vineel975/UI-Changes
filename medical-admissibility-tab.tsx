@@ -43,18 +43,18 @@ async function fetchICDCode(
 ): Promise<{ code: string; description: string } | undefined> {
   try {
     const searchTerm = condition.split("(")[0].trim().toLowerCase();
-    // API returns [numFound, [codes], extra, [[code, description], ...]]
+    // NLM response format: [totalCount, [codes], null, [[code, name], [code, name], ...]]
+    // With sf=code,name the 4th element is an array of [code, description] pairs
     const response = await fetch(
       `https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?sf=code,name&terms=${encodeURIComponent(searchTerm)}&maxList=10`,
     );
-    const result = await response.json() as [number, string[], unknown, string[][]];
-    if (Array.isArray(result) && result[1]?.length > 0) {
-      const code = result[1][0];
-      const namePair = result[3]?.[0];
-      const description = Array.isArray(namePair) ? (namePair[1] ?? "") : "";
-      return { code, description };
-    }
-    return undefined;
+    const result = await response.json() as [number, string[], null, [string, string][]];
+    if (!Array.isArray(result) || !result[1]?.length) return undefined;
+
+    const code = result[1][0];
+    // result[3] is [[code, name], [code, name], ...] — grab the name from index 1
+    const description = result[3]?.[0]?.[1] ?? "";
+    return { code, description };
   } catch {
     return undefined;
   }
@@ -71,7 +71,12 @@ function buildConditionRows(
       .toLowerCase()
       .replace(/\s+/g, "_");
 
-    const icdEntry = icdCodeMap.get(conditionKey);
+    // Exact match first, then partial match in case of slight key mismatch
+    const icdEntry =
+      icdCodeMap.get(conditionKey) ??
+      Array.from(icdCodeMap.entries()).find(([k]) =>
+        k.includes(conditionKey) || conditionKey.includes(k),
+      )?.[1];
 
     const reported: "Yes" | "No" =
       ct.status === "expected" ||
@@ -85,32 +90,6 @@ function buildConditionRows(
       reported,
       icdCode: icdEntry?.code,
       icdDescription: icdEntry?.description,
-      pageNumber: ct.pageNumber,
-      conditionKey,
-    };
-  });
-}
-): ConditionRow[] {
-  if (!conditionTests.length) return [];
-
-  return conditionTests.map((ct) => {
-    const conditionKey = (ct.condition || ct.matchedDiagnosis || "")
-      .toLowerCase()
-      .replace(/\s+/g, "_");
-
-    const icdCode = icdCodeMap.get(conditionKey) || undefined;
-
-    const reported: "Yes" | "No" =
-      ct.status === "expected" ||
-      (ct.reportValue || "").toLowerCase() === "yes"
-        ? "Yes"
-        : "No";
-
-    return {
-      condition: ct.condition || ct.matchedDiagnosis || "—",
-      test: ct.testName || "—",
-      reported,
-      icdCode,
       pageNumber: ct.pageNumber,
       conditionKey,
     };
@@ -146,6 +125,7 @@ export function MedicalAdmissibilityTab({
 
           const conditionLabel = ct.condition || ct.matchedDiagnosis || "";
           const fetched = await fetchICDCode(conditionLabel);
+          console.log("[ICD]", conditionLabel, "→", fetched);
           if (fetched) {
             newIcdCodeMap.set(conditionKey, fetched);
           }
