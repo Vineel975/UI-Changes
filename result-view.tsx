@@ -208,7 +208,7 @@ export function ResultView({
     }, 100);
   };
 
-  const handleScrollToTariffPage = (pageNumber?: number | null, highlightText?: string) => {
+  const handleScrollToTariffPage = (pageNumber?: number | null, highlightText?: string, highlightName?: string) => {
     if (!pdfContainerRef.current || !pageNumber || pageNumber <= 0) return;
     if (!tariffFile) return;
 
@@ -221,6 +221,8 @@ export function ResultView({
         (el as HTMLElement).style.removeProperty("background");
         (el as HTMLElement).style.removeProperty("border-radius");
         (el as HTMLElement).style.removeProperty("padding");
+        (el as HTMLElement).style.removeProperty("outline");
+        (el as HTMLElement).style.removeProperty("outline-offset");
       });
     };
 
@@ -242,27 +244,88 @@ export function ResultView({
             block: "start",
           });
 
-          // Highlight matching text in the text layer after a short delay
-          // to allow the page to fully render
           if (highlightText) {
-            const normalizedSearch = highlightText.replace(/,/g, "").trim();
             setTimeout(() => {
-              const textSpans = (el as HTMLElement).querySelectorAll(
-                ".react-pdf__Page__textContent span",
-              );
-              textSpans.forEach((span) => {
-                const text = span.textContent?.replace(/,/g, "").trim() || "";
-                if (
-                  text.includes(normalizedSearch) ||
-                  normalizedSearch.includes(text) &&
-                  text.length > 2
-                ) {
-                  (span as HTMLElement).classList.add("tariff-highlight");
-                  (span as HTMLElement).style.background = "rgba(251, 191, 36, 0.6)";
-                  (span as HTMLElement).style.borderRadius = "2px";
-                  (span as HTMLElement).style.padding = "1px 2px";
+              const normalize = (s: string) => s.replace(/,/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+              const normalizedAmount = normalize(highlightText);
+              const normalizedName = highlightName ? normalize(highlightName) : null;
+
+              const textSpans = Array.from(
+                (el as HTMLElement).querySelectorAll(".react-pdf__Page__textContent span"),
+              ) as HTMLElement[];
+
+              const applyHighlight = (span: HTMLElement) => {
+                span.classList.add("tariff-highlight");
+                span.style.background = "rgba(251, 191, 36, 0.6)";
+                span.style.borderRadius = "2px";
+                span.style.padding = "1px 2px";
+                span.style.outline = "2px solid rgba(217, 119, 6, 0.7)";
+                span.style.outlineOffset = "1px";
+              };
+
+              // If we have a procedure name, use proximity matching:
+              // Find amount spans that are on the same visual line as the procedure name span
+              if (normalizedName) {
+                // Step 1: find all spans that contain the procedure name
+                const nameSpans = textSpans.filter((span) => {
+                  const text = normalize(span.textContent || "");
+                  return text && normalizedName.includes(text) && text.length > 2;
+                });
+
+                // Step 2: for each name span, find the amount span on the same visual line
+                // "Same line" = top position within ±5px (PDF text layer uses transform/top)
+                let highlighted = false;
+                for (const nameSpan of nameSpans) {
+                  const nameRect = nameSpan.getBoundingClientRect();
+                  const nameTop = nameRect.top;
+
+                  // Find amount spans on the same line
+                  const amountSpansOnLine = textSpans.filter((span) => {
+                    const text = normalize(span.textContent || "");
+                    if (!text) return false;
+                    const matchesAmount =
+                      text === normalizedAmount ||
+                      text.includes(normalizedAmount) ||
+                      (normalizedAmount.includes(text) && text.length > 2);
+                    if (!matchesAmount) return false;
+                    const rect = span.getBoundingClientRect();
+                    return Math.abs(rect.top - nameTop) < 8; // within 8px vertically = same line
+                  });
+
+                  if (amountSpansOnLine.length > 0) {
+                    amountSpansOnLine.forEach(applyHighlight);
+                    highlighted = true;
+                    break;
+                  }
                 }
-              });
+
+                // Fallback: if name not found, highlight all amount matches
+                // (this handles cases where procedure name isn't in the PDF text layer)
+                if (!highlighted) {
+                  textSpans.forEach((span) => {
+                    const text = normalize(span.textContent || "");
+                    if (
+                      text &&
+                      (text === normalizedAmount ||
+                        (text.includes(normalizedAmount) && text.length > 2))
+                    ) {
+                      applyHighlight(span);
+                    }
+                  });
+                }
+              } else {
+                // No name provided — original behaviour, highlight all amount matches
+                textSpans.forEach((span) => {
+                  const text = normalize(span.textContent || "");
+                  if (
+                    text &&
+                    (text.includes(normalizedAmount) ||
+                      (normalizedAmount.includes(text) && text.length > 2))
+                  ) {
+                    applyHighlight(span);
+                  }
+                });
+              }
             }, 600);
           }
 
