@@ -482,17 +482,6 @@ export function ResultView({
 
   return (
     <main className="flex-1 w-full h-full overflow-hidden">
-      {canToggleLogsPanel && (
-        <div className="flex justify-end gap-2 px-4 py-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setIsLogsPanelForced((prev) => !prev)}
-          >
-            {isLogsPanelForced ? "View Analysis" : "View Logs"}
-          </Button>
-        </div>
-      )}
       <ResizablePanelGroup orientation="horizontal" className="h-full">
         {/* Tabs Content - Left Side */}
         <ResizablePanel
@@ -517,7 +506,7 @@ export function ResultView({
                       data-variant="default"
                       className={cn(
                         tabsListVariants({ variant: "default" }),
-                         "grid w-full grid-cols-4",
+                         "grid w-full grid-cols-3",
                       )}
                     >
                       {reportSections.map((section) => (
