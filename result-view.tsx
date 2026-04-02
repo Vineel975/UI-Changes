@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ProcessingState } from "@/src/processing-service";
-import type { BSIData, ExtractionResult, PdfAnalysis } from "@/src/types";
+import type { ExtractionResult, PdfAnalysis } from "@/src/types";
 import { ChangeLog } from "@/src/changelog";
 import { computeClaimCalculation } from "@/src/claim-calculation";
 import { ProcessingLogs } from "./result-view/processing-logs";
@@ -285,11 +285,6 @@ export function ResultView({
   const finalInsurerPayableNotes =
     claimCalculation?.finalInsurerPayableNotes ||
     displayAnalysis?.finalInsurerPayableNotes;
-
-  // BSI stored on result.analysis.bsiData by Convex — read directly
-  const bsiData: BSIData | null =
-    (displayAnalysis as (PdfAnalysis & { bsiData?: BSIData | null }) | null)
-      ?.bsiData ?? null;
 
   const handleSave = async () => {
     if (!editedAnalysis || !selectedFileResult) return;
@@ -606,7 +601,6 @@ export function ResultView({
                     }}
                     onTariffAmountClick={handleScrollToTariffPage}
                     claimId={state?.claimId}
-                    bsiData={bsiData}
                   />
                 </section>
                 <div className="mt-6 border-t border-border/80 py-4">
