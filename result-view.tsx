@@ -246,12 +246,15 @@ export function ResultView({
 
           if (highlightText) {
             setTimeout(() => {
-              const normalize = (s: string) => s.replace(/,/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+              const normalize = (s: string) =>
+                s.replace(/,/g, "").replace(/\s+/g, " ").trim().toLowerCase();
               const normalizedAmount = normalize(highlightText);
               const normalizedName = highlightName ? normalize(highlightName) : null;
 
               const textSpans = Array.from(
-                (el as HTMLElement).querySelectorAll(".react-pdf__Page__textContent span"),
+                (el as HTMLElement).querySelectorAll(
+                  ".react-pdf__Page__textContent span",
+                ),
               ) as HTMLElement[];
 
               const applyHighlight = (span: HTMLElement) => {
@@ -263,69 +266,66 @@ export function ResultView({
                 span.style.outlineOffset = "1px";
               };
 
-              // If we have a procedure name, use proximity matching:
-              // Find amount spans that are on the same visual line as the procedure name span
+              // Find all spans that contain the amount
+              const amountSpanIndices: number[] = [];
+              textSpans.forEach((span, i) => {
+                const text = normalize(span.textContent || "");
+                if (
+                  text &&
+                  (text === normalizedAmount ||
+                    text.includes(normalizedAmount) ||
+                    (normalizedAmount.includes(text) && text.length > 2))
+                ) {
+                  amountSpanIndices.push(i);
+                }
+              });
+
+              if (amountSpanIndices.length === 0) return;
+
+              // If only one amount match — highlight it directly
+              if (amountSpanIndices.length === 1) {
+                applyHighlight(textSpans[amountSpanIndices[0]]);
+                return;
+              }
+
+              // Multiple matches — try to find the one closest to the procedure name
               if (normalizedName) {
-                // Step 1: find all spans that contain the procedure name
-                const nameSpans = textSpans.filter((span) => {
-                  const text = normalize(span.textContent || "");
-                  return text && normalizedName.includes(text) && text.length > 2;
-                });
+                // Find the index of a span whose text is part of the procedure name
+                let nameSpanIndex = -1;
+                const nameWords = normalizedName.split(" ").filter((w) => w.length > 3);
 
-                // Step 2: for each name span, find the amount span on the same visual line
-                // "Same line" = top position within ±5px (PDF text layer uses transform/top)
-                let highlighted = false;
-                for (const nameSpan of nameSpans) {
-                  const nameRect = nameSpan.getBoundingClientRect();
-                  const nameTop = nameRect.top;
-
-                  // Find amount spans on the same line
-                  const amountSpansOnLine = textSpans.filter((span) => {
-                    const text = normalize(span.textContent || "");
-                    if (!text) return false;
-                    const matchesAmount =
-                      text === normalizedAmount ||
-                      text.includes(normalizedAmount) ||
-                      (normalizedAmount.includes(text) && text.length > 2);
-                    if (!matchesAmount) return false;
-                    const rect = span.getBoundingClientRect();
-                    return Math.abs(rect.top - nameTop) < 8; // within 8px vertically = same line
-                  });
-
-                  if (amountSpansOnLine.length > 0) {
-                    amountSpansOnLine.forEach(applyHighlight);
-                    highlighted = true;
+                for (let i = 0; i < textSpans.length; i++) {
+                  const text = normalize(textSpans[i].textContent || "");
+                  if (
+                    text &&
+                    text.length > 2 &&
+                    nameWords.some((word) => text.includes(word))
+                  ) {
+                    nameSpanIndex = i;
                     break;
                   }
                 }
 
-                // Fallback: if name not found, highlight all amount matches
-                // (this handles cases where procedure name isn't in the PDF text layer)
-                if (!highlighted) {
-                  textSpans.forEach((span) => {
-                    const text = normalize(span.textContent || "");
-                    if (
-                      text &&
-                      (text === normalizedAmount ||
-                        (text.includes(normalizedAmount) && text.length > 2))
-                    ) {
-                      applyHighlight(span);
+                if (nameSpanIndex >= 0) {
+                  // Pick the amount span with the smallest index distance to the name span
+                  let closestIdx = amountSpanIndices[0];
+                  let minDist = Math.abs(amountSpanIndices[0] - nameSpanIndex);
+
+                  for (const idx of amountSpanIndices) {
+                    const dist = Math.abs(idx - nameSpanIndex);
+                    if (dist < minDist) {
+                      minDist = dist;
+                      closestIdx = idx;
                     }
-                  });
-                }
-              } else {
-                // No name provided — original behaviour, highlight all amount matches
-                textSpans.forEach((span) => {
-                  const text = normalize(span.textContent || "");
-                  if (
-                    text &&
-                    (text.includes(normalizedAmount) ||
-                      (normalizedAmount.includes(text) && text.length > 2))
-                  ) {
-                    applyHighlight(span);
                   }
-                });
+
+                  applyHighlight(textSpans[closestIdx]);
+                  return;
+                }
               }
+
+              // Fallback — highlight all amount matches
+              amountSpanIndices.forEach((i) => applyHighlight(textSpans[i]));
             }, 600);
           }
 
