@@ -43,17 +43,34 @@ async function fetchICDCode(
 ): Promise<{ code: string; description: string } | undefined> {
   try {
     const searchTerm = condition.split("(")[0].trim().toLowerCase();
-    // NLM response format: [totalCount, [codes], null, [[code, name], [code, name], ...]]
-    // With sf=code,name the 4th element is an array of [code, description] pairs
+    // NLM response: [totalCount, [codes], null, [displayStrings]]
+    // displayStrings are flat strings e.g. "H25.9 Age-related nuclear cataract"
     const response = await fetch(
       `https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?sf=code,name&terms=${encodeURIComponent(searchTerm)}&maxList=10`,
     );
-    const result = await response.json() as [number, string[], null, [string, string][]];
+    const result = await response.json() as [number, string[], null, string[]];
     if (!Array.isArray(result) || !result[1]?.length) return undefined;
 
     const code = result[1][0];
-    // result[3] is [[code, name], [code, name], ...] — grab the name from index 1
-    const description = result[3]?.[0]?.[1] ?? "";
+
+    // result[3] is a flat array of display strings — try all common formats:
+    // "H25.9 Age-related nuclear cataract"          (space-separated)
+    // "H25.9 - Age-related nuclear cataract"        (dash-separated)
+    // [[code, name], ...]                            (nested pairs — older API versions)
+    const raw = result[3]?.[0];
+    let description = "";
+
+    if (typeof raw === "string") {
+      // Strip the code prefix and any separator
+      description = raw
+        .replace(new RegExp(`^${code}\\s*[-–]?\\s*`), "")
+        .trim();
+    } else if (Array.isArray(raw)) {
+      // Nested pair format [code, name]
+      description = (raw as string[])[1] ?? "";
+    }
+
+    console.log("[ICD debug] raw:", raw, "→ code:", code, "desc:", description);
     return { code, description };
   } catch {
     return undefined;
