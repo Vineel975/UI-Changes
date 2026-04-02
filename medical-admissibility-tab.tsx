@@ -16,8 +16,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type {
   ConditionTestCheck,
+  ConditionTestStatus,
   PdfAnalysis,
 } from "@/src/types";
 
@@ -27,90 +35,281 @@ interface MedicalAdmissibilityTabProps {
   onScrollToPage?: (pageNumber: number) => void;
 }
 
+type ConditionKey = string;
+
+type TestRule = {
+  key: string;
+  label: string;
+  expected: string;
+  concern: string;
+  evaluate: (input: {
+    rawValue?: string;
+    numericValue?: number;
+    source?: ConditionTestCheck;
+  }) => { status: ConditionTestStatus; reason?: string };
+  matchers?: string[];
+};
+
+type ConditionRule = {
+  key: ConditionKey;
+  label: string;
+  diagnosisKeywords: string[];
+  tests: TestRule[];
+  icdCode?: string;
+};
+
 type ConditionRow = {
   condition: string;
   test: string;
   reported: "Yes" | "No";
   icdCode?: string;
-  icdDescription?: string;
   pageNumber?: number;
-  conditionKey: string;
+  conditionKey?: string; // Added to identify which condition this row belongs to
 };
 
-/** Fetches the best-matching ICD-10-CM code and description for any condition via NLM API. */
-async function fetchICDCode(
-  condition: string,
-): Promise<{ code: string; description: string } | undefined> {
+function inferDefaultCataractIcdCode(
+  medicalAdmissibility?: PdfAnalysis["medicalAdmissibility"] | null
+): string {
+  const diagnosis = (medicalAdmissibility?.diagnosis || "").toLowerCase();
+  const doctorNotes = (medicalAdmissibility?.doctorNotes || "").toLowerCase();
+  const conditionTestsText = (
+    ((medicalAdmissibility as { conditionTests?: ConditionTestCheck[] })
+      ?.conditionTests || []) as ConditionTestCheck[]
+  )
+    .map((ct) => {
+      return `${ct.condition || ""} ${ct.matchedDiagnosis || ""} ${ct.testName || ""} ${ct.reportValue || ""} ${ct.sourceText || ""}`.toLowerCase();
+    })
+    .join(" ");
+
+  const combined = `${diagnosis} ${doctorNotes} ${conditionTestsText}`.trim();
+
+  if (
+    combined.includes("secondary cataract") ||
+    combined.includes("after cataract")
+  ) {
+    return "H26.40";
+  }
+  if (combined.includes("cortical")) {
+    return "H25.9";
+  }
+
+  // Safe default starting point for cataract, user can change from dropdown.
+  return "H25.9";
+}
+
+function matchesTestName(testName: string, rule: TestRule): boolean {
+  const normalized = testName.toLowerCase();
+  if (normalized.includes(rule.label.toLowerCase())) return true;
+  if (rule.matchers) {
+    return rule.matchers.some((matcher) => normalized.includes(matcher));
+  }
+  return false;
+}
+
+function matchesConditionName(
+  condition: string | undefined,
+  rule: ConditionRule
+): boolean {
+  if (!condition) return false;
+  const normalized = condition.toLowerCase();
+  return (
+    normalized.includes(rule.label.toLowerCase()) ||
+    normalized.includes(rule.key)
+  );
+}
+
+/**
+ * Fetches ICD-10-CM code for a medical condition using NLM API
+ * Extracts the base condition name (removes parenthetical test info) for better search results
+ */
+async function fetchICDCode(condition: string): Promise<string | undefined> {
   try {
-    const searchTerm = condition.split("(")[0].trim().toLowerCase();
-    // NLM response: [totalCount, [codes], null, [displayStrings]]
-    // displayStrings are flat strings e.g. "H25.9 Age-related nuclear cataract"
+    // Extract the base condition name by removing parenthetical information
+    // e.g., "Cataract (A-scan)" -> "Cataract", "Age-related cataract" -> "Age-related cataract"
+    const baseCondition = condition.split("(")[0].trim();
+
+    // Try searching with the base condition first
+    let searchTerm = baseCondition.toLowerCase();
+
     const response = await fetch(
-      `https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?sf=code,name&terms=${encodeURIComponent(searchTerm)}&maxList=10`,
+      `https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search?sf=code,name&terms=${encodeURIComponent(searchTerm)}&maxList=15`
     );
-    const result = await response.json() as [number, string[], null, string[]];
-    if (!Array.isArray(result) || !result[1]?.length) return undefined;
-
-    const code = result[1][0];
-
-    // result[3] is a flat array of display strings — try all common formats:
-    // "H25.9 Age-related nuclear cataract"          (space-separated)
-    // "H25.9 - Age-related nuclear cataract"        (dash-separated)
-    // [[code, name], ...]                            (nested pairs — older API versions)
-    const raw = result[3]?.[0];
-    let description = "";
-
-    if (typeof raw === "string") {
-      // Strip the code prefix and any separator
-      description = raw
-        .replace(new RegExp(`^${code}\\s*[-–]?\\s*`), "")
-        .trim();
-    } else if (Array.isArray(raw)) {
-      // Nested pair format [code, name]
-      description = (raw as string[])[1] ?? "";
+    const result = await response.json();
+    // API returns [numFound, [codes], [names]]
+    if (
+      result &&
+      Array.isArray(result) &&
+      result.length >= 2 &&
+      result[1].length > 0
+    ) {
+      // Prefer age-related codes if searching for cataract
+      if (searchTerm.includes("cataract")) {
+        const ageRelatedIndex = result[1].findIndex((code: string) =>
+          code.startsWith("H25")
+        );
+        if (ageRelatedIndex !== -1) {
+          return result[1][ageRelatedIndex];
+        }
+      }
+      // Otherwise return the first matching ICD code
+      return result[1][0];
     }
-
-    console.log("[ICD debug] raw:", raw, "→ code:", code, "desc:", description);
-    return { code, description };
-  } catch {
+    return undefined;
+  } catch (error) {
+    console.error(`Error fetching ICD code for ${condition}:`, error);
     return undefined;
   }
 }
 
-function buildConditionRows(
-  conditionTests: ConditionTestCheck[],
-  icdCodeMap: Map<string, { code: string; description: string }>,
-): ConditionRow[] {
-  if (!conditionTests.length) return [];
+const conditionRules: ConditionRule[] = [
+  {
+    key: "cataract",
+    label: "Cataract (A-scan)",
+    diagnosisKeywords: ["cataract"],
+    icdCode: "H25.9", // Valid dropdown default (can be overridden by API/user)
+    tests: [
+      {
+        key: "a_scan",
+        label: "A-scan",
+        expected: "",
+        concern: "",
+        evaluate: ({ rawValue }) => {
+          // Check if A-scan is reported (Yes) or not (No)
+          if (!rawValue) {
+            return { status: "missing" };
+          }
+          const value = rawValue.toLowerCase();
+          if (
+            value === "yes" ||
+            value.includes("a-scan") ||
+            value.includes("ascan") ||
+            value.includes("axial length")
+          ) {
+            return { status: "expected" };
+          }
+          return { status: "missing" };
+        },
+        matchers: ["a-scan", "ascan", "axial length", "axl"],
+      },
+    ],
+  },
+];
 
-  return conditionTests.map((ct) => {
+// Cataract ICD-10-CM codes with descriptions (2026)
+const cataractICDCodes = [
+  { code: "H26.9", description: "Unspecified cataract" },
+  { code: "H25.9", description: "Unspecified age-related (senile) cataract" },
+  { code: "H25.011", description: "Cortical age-related cataract, right eye" },
+  { code: "H25.012", description: "Cortical age-related cataract, left eye" },
+  { code: "H25.013", description: "Cortical age-related cataract, bilateral" },
+  { code: "H26.40", description: "Secondary cataract, unspecified eye" },
+  { code: "H26.41", description: "Secondary cataract, right eye" },
+  { code: "H26.42", description: "Secondary cataract, left eye" },
+  { code: "H26.43", description: "Secondary cataract, bilateral" },
+];
+
+function buildConditionRows(
+  diagnosisText: string,
+  conditionTests?: ConditionTestCheck[],
+  icdCodeMap?: Map<string, string>
+): ConditionRow[] {
+  const rows: ConditionRow[] = [];
+
+  for (const rule of conditionRules) {
+    const aiCondition = conditionTests?.find((condition) =>
+      matchesConditionName(condition.condition, rule)
+    );
+    const matchedByDiagnosis = rule.diagnosisKeywords.some((keyword) =>
+      diagnosisText.includes(keyword)
+    );
+
+    if (!aiCondition && !matchedByDiagnosis) {
+      continue;
+    }
+
+    // Get ICD code from map or rule
+    const icdCode = icdCodeMap?.get(rule.key) || rule.icdCode || undefined;
+
+    for (const testRule of rule.tests) {
+      const fallbackConditionByTest = conditionTests?.find((condition) =>
+        matchesTestName(condition.testName || "", testRule)
+      );
+      const aiTest =
+        (aiCondition &&
+        matchesTestName(aiCondition.testName || "", testRule)
+          ? aiCondition
+          : undefined) || fallbackConditionByTest;
+      const selectedCondition = aiTest || aiCondition || fallbackConditionByTest;
+      const rawValue = aiTest?.reportValue || aiTest?.sourceText;
+
+      const evaluation = testRule.evaluate({
+        rawValue,
+        numericValue: undefined,
+        source: aiTest,
+      });
+
+      // Determine if reported (Yes) or not (No)
+      const reported: "Yes" | "No" =
+        evaluation.status === "expected" ||
+        (rawValue && rawValue.toLowerCase() === "yes") ||
+        (aiTest && aiTest.status === "expected")
+          ? "Yes"
+          : "No";
+
+      // Get page number from condition
+      const conditionPageNumber = selectedCondition?.pageNumber;
+
+      rows.push({
+        condition: rule.label,
+        test: testRule.label,
+        reported,
+        icdCode,
+        pageNumber: conditionPageNumber,
+        conditionKey: rule.key, // Add condition key for dropdown
+      });
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Builds rows for AI-extracted conditions that don't match any hardcoded rule.
+ * Handles any condition — maternity, glaucoma, diabetes, etc.
+ */
+function buildDynamicConditionRows(
+  conditionTests: ConditionTestCheck[],
+  icdCodeMap?: Map<string, string>,
+): ConditionRow[] {
+  const rows: ConditionRow[] = [];
+  for (const ct of conditionTests) {
+    const matchesRule = conditionRules.some((r) =>
+      matchesConditionName(ct.condition, r)
+    );
+    if (matchesRule) continue; // already handled by buildConditionRows
+
     const conditionKey = (ct.condition || ct.matchedDiagnosis || "")
       .toLowerCase()
-      .replace(/\s+/g, "_");
+      .trim();
+    if (!conditionKey) continue;
 
-    // Exact match first, then partial match in case of slight key mismatch
-    const icdEntry =
-      icdCodeMap.get(conditionKey) ??
-      Array.from(icdCodeMap.entries()).find(([k]) =>
-        k.includes(conditionKey) || conditionKey.includes(k),
-      )?.[1];
-
+    const icdCode = icdCodeMap?.get(conditionKey) || undefined;
     const reported: "Yes" | "No" =
       ct.status === "expected" ||
       (ct.reportValue || "").toLowerCase() === "yes"
         ? "Yes"
         : "No";
 
-    return {
+    rows.push({
       condition: ct.condition || ct.matchedDiagnosis || "—",
       test: ct.testName || "—",
       reported,
-      icdCode: icdEntry?.code,
-      icdDescription: icdEntry?.description,
+      icdCode,
       pageNumber: ct.pageNumber,
       conditionKey,
-    };
-  });
+    });
+  }
+  return rows;
 }
 
 export function MedicalAdmissibilityTab({
@@ -118,50 +317,105 @@ export function MedicalAdmissibilityTab({
   medicalAdmissibility,
   onScrollToPage,
 }: MedicalAdmissibilityTabProps) {
-  const [icdCodeMap, setIcdCodeMap] = useState<Map<string, { code: string; description: string }>>(new Map());
+  const [icdCodeMap, setIcdCodeMap] = useState<Map<string, string>>(new Map());
+  const [selectedICDCodes, setSelectedICDCodes] = useState<
+    Map<string, string>
+  >(new Map()); // conditionKey -> ICD code
 
-  // Fetch ICD-10-CM codes and descriptions for all AI-extracted conditions via NLM API
+  // Fetch ICD codes for conditions that appear in the data
   useEffect(() => {
     const fetchICDCodes = async () => {
       if (!medicalAdmissibility) return;
 
+      const diagnosisText = (
+        medicalAdmissibility.diagnosis || ""
+      ).toLowerCase();
       const conditionTests =
         (medicalAdmissibility as { conditionTests?: ConditionTestCheck[] })
           .conditionTests || [];
 
-      if (!conditionTests.length) return;
+      const newIcdCodeMap = new Map<string, string>();
+      const fallbackCataractIcd = inferDefaultCataractIcdCode(medicalAdmissibility);
 
-      const newIcdCodeMap = new Map<string, { code: string; description: string }>();
+      // Find which hardcoded-rule conditions are present
+      const presentConditions = new Set<string>();
+      for (const rule of conditionRules) {
+        const aiCondition = conditionTests.find((condition) =>
+          matchesConditionName(condition.condition, rule)
+        );
+        const matchedByDiagnosis = rule.diagnosisKeywords.some((keyword) =>
+          diagnosisText.includes(keyword)
+        );
+        if (aiCondition || matchedByDiagnosis) {
+          presentConditions.add(rule.key);
+        }
+      }
 
+      // Also fetch ICD for any AI-extracted conditions not in conditionRules
+      for (const ct of conditionTests) {
+        const matchesRule = conditionRules.some((r) =>
+          matchesConditionName(ct.condition, r)
+        );
+        if (!matchesRule) {
+          const key = (ct.condition || ct.matchedDiagnosis || "").toLowerCase().trim();
+          if (key) presentConditions.add(key);
+        }
+      }
+
+      // Fetch ICD codes for present conditions (always fetch, but use hardcoded as fallback)
       await Promise.all(
-        conditionTests.map(async (ct) => {
-          const conditionKey = (ct.condition || ct.matchedDiagnosis || "")
-            .toLowerCase()
-            .replace(/\s+/g, "_");
-          if (!conditionKey || newIcdCodeMap.has(conditionKey)) return;
+        Array.from(presentConditions).map(async (conditionKey) => {
+          const rule = conditionRules.find((r) => r.key === conditionKey);
+          const searchLabel = rule?.label || conditionKey;
 
-          const conditionLabel = ct.condition || ct.matchedDiagnosis || "";
-          const fetched = await fetchICDCode(conditionLabel);
-          console.log("[ICD]", conditionLabel, "→", fetched);
-          if (fetched) {
-            newIcdCodeMap.set(conditionKey, fetched);
+          const fetchedIcdCode = await fetchICDCode(searchLabel);
+          const icdCode =
+            fetchedIcdCode ||
+            (rule?.key === "cataract" ? fallbackCataractIcd : undefined) ||
+            rule?.icdCode;
+
+          if (icdCode) {
+            newIcdCodeMap.set(conditionKey, icdCode);
           }
-        }),
+        })
       );
 
+      // Initialize with best available defaults so ICD is never blank at start.
       setIcdCodeMap(newIcdCodeMap);
+      setSelectedICDCodes(new Map(newIcdCodeMap));
     };
 
-    void fetchICDCodes();
+    fetchICDCodes();
   }, [medicalAdmissibility]);
 
-  const conditionRows = medicalAdmissibility
-    ? buildConditionRows(
-        (medicalAdmissibility as { conditionTests?: ConditionTestCheck[] })
-          .conditionTests || [],
-        icdCodeMap,
-      )
+  const conditionTests = medicalAdmissibility
+    ? ((medicalAdmissibility as { conditionTests?: ConditionTestCheck[] }).conditionTests || [])
     : [];
+
+  const conditionRows = medicalAdmissibility
+    ? [
+        ...buildConditionRows(
+          (medicalAdmissibility.diagnosis || "").toLowerCase(),
+          conditionTests,
+          icdCodeMap,
+        ),
+        ...buildDynamicConditionRows(conditionTests, icdCodeMap),
+      ]
+    : [];
+
+  // Handle ICD code selection for cataract
+  const handleICDCodeChange = (conditionKey: string, code: string) => {
+    setSelectedICDCodes((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(conditionKey, code);
+      return newMap;
+    });
+  };
+
+  // Get display ICD code (prefer selected, fall back to fetched)
+  const getDisplayICDCode = (conditionKey: string, fetchedCode?: string) => {
+    return selectedICDCodes.get(conditionKey) || fetchedCode;
+  };
 
   return (
     <Card>
@@ -179,7 +433,6 @@ export function MedicalAdmissibilityTab({
           </div>
         ) : (
           <div className="space-y-4">
-
               {medicalAdmissibility.diagnosis && (
                 <div className="space-y-2">
                   <div className="text-sm font-semibold text-gray-700">
@@ -265,48 +518,70 @@ export function MedicalAdmissibilityTab({
                             >
                               {row.test}
                             </TableCell>
-                            {/* ICD Code-1 */}
+                            {/* ICD Code-1 — cataract gets dropdown, others show fetched code */}
                             <TableCell className="align-top">
-                              {row.icdCode ? (
+                              {row.conditionKey === "cataract" ? (
+                                <Select
+                                  value={getDisplayICDCode(row.conditionKey, row.icdCode)}
+                                  onValueChange={(code) => handleICDCodeChange(row.conditionKey!, code)}
+                                >
+                                  <SelectTrigger className="h-8 w-full min-w-[120px]">
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {cataractICDCodes.map((icd) => (
+                                      <SelectItem key={icd.code} value={icd.code}>
+                                        <span className="font-mono text-sm font-medium text-blue-700">
+                                          {icd.code}
+                                        </span>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : row.icdCode ? (
                                 <span className="text-sm font-mono text-blue-700">
                                   {row.icdCode}
                                 </span>
-                              ) : medicalAdmissibility?.icdCode1 ? (
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Loading...
+                                </span>
+                              )}
+                            </TableCell>
+                            {/* ICD Code-2 — from AI extraction */}
+                            <TableCell className="align-top">
+                              {(medicalAdmissibility as { icdCode2?: string })?.icdCode2 ? (
                                 <span className="text-sm font-mono text-blue-700">
-                                  {medicalAdmissibility.icdCode1}
+                                  {(medicalAdmissibility as { icdCode2?: string }).icdCode2}
                                 </span>
                               ) : (
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            {/* ICD Code-2 */}
+                            {/* ICD Code-3 — from AI extraction */}
                             <TableCell className="align-top">
-                              {medicalAdmissibility?.icdCode2 ? (
+                              {(medicalAdmissibility as { icdCode3?: string })?.icdCode3 ? (
                                 <span className="text-sm font-mono text-blue-700">
-                                  {medicalAdmissibility.icdCode2}
+                                  {(medicalAdmissibility as { icdCode3?: string }).icdCode3}
                                 </span>
                               ) : (
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </TableCell>
-                            {/* ICD Code-3 */}
+                            {/* ICD Description — cataract uses local lookup, others show Loading... */}
                             <TableCell className="align-top">
-                              {medicalAdmissibility?.icdCode3 ? (
-                                <span className="text-sm font-mono text-blue-700">
-                                  {medicalAdmissibility.icdCode3}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
-                            {/* ICD Description — from NLM API lookup */}
-                            <TableCell className="align-top">
-                              {row.icdDescription ? (
+                              {row.conditionKey === "cataract" ? (
                                 <span className="text-sm text-gray-700">
-                                  {row.icdDescription}
+                                  {cataractICDCodes.find(
+                                    (icd) => icd.code === getDisplayICDCode(row.conditionKey!, row.icdCode)
+                                  )?.description || "-"}
                                 </span>
+                              ) : row.icdCode ? (
+                                <span className="text-xs text-muted-foreground">-</span>
                               ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
+                                <span className="text-xs text-muted-foreground">
+                                  Loading...
+                                </span>
                               )}
                             </TableCell>
                             <TableCell
